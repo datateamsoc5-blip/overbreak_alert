@@ -66,8 +66,8 @@ class SheetsMonitor:
             print(f"Error getting workstation dump data: {e}")
             return {"data": [], "worksheet": None, "error": str(e)}
 
-    def get_first_row_data(self) -> Dict[str, Any]:
-        """Get only the first row (A3:H3) for change detection"""
+    def get_workstation_data(self) -> Dict[str, Any]:
+        """Get data from A3:H range for change detection"""
         try:
             client = self._get_client()
             spreadsheet = client.open_by_key(self.spreadsheet_id)
@@ -77,17 +77,23 @@ class SheetsMonitor:
             except gspread.WorksheetNotFound:
                 worksheet = spreadsheet.worksheet("workstation_dump")
 
-            # Get only A3:H3 (first row)
-            first_row = worksheet.get('A3:H3')
+            # Get full range A3:H (all data rows)
+            data_range = worksheet.get('A3:H')
+
+            # Flatten all data for comparison
+            all_data = []
+            for row in data_range:
+                all_data.extend(row)
 
             return {
-                "first_row": first_row[0] if first_row else [],
+                "data": data_range,
+                "flat_data": all_data,
                 "worksheet": worksheet,
-                "is_empty": not first_row or all(cell == "" for cell in first_row[0]) if first_row else True
+                "is_empty": not data_range or all(cell == "" for cell in all_data)
             }
         except Exception as e:
-            print(f"Error getting first row data: {e}")
-            return {"first_row": [], "worksheet": None, "is_empty": True, "error": str(e)}
+            print(f"Error getting workstation data: {e}")
+            return {"data": [], "flat_data": [], "worksheet": None, "is_empty": True, "error": str(e)}
     
     def get_attendance_timein_data(self) -> Dict[str, Any]:
         """Get data from attendance_timein_data tab"""
@@ -169,11 +175,11 @@ class SheetsMonitor:
         import json
         return json.dumps(data, sort_keys=True)
 
-    def _has_first_row_changed(self, current_row: List) -> tuple[bool, bool]:
-        """Check if first row has changed or was deleted/replaced.
+    def _has_data_changed(self, current_data: List) -> tuple[bool, bool]:
+        """Check if data in A3:H has changed or was deleted/replaced.
         Returns: (has_changed, was_deleted_and_replaced)"""
-        current_hash = self._compute_data_hash(current_row)
-        is_empty = not current_row or all(cell == "" for cell in current_row)
+        current_hash = self._compute_data_hash(current_data)
+        is_empty = not current_data or all(cell == "" for cell in current_data)
 
         with self._lock:
             if self._last_data_hash is None:
@@ -181,17 +187,17 @@ class SheetsMonitor:
                 self._last_data_hash = current_hash
                 return False, False
 
-            # Check if row was deleted (became empty) and now has data
+            # Check if data was deleted (became empty) and now has data
             last_was_empty = self._last_data_hash == self._compute_data_hash([])
             now_has_data = not is_empty
 
             if last_was_empty and now_has_data:
-                # Row was deleted and replaced with new data
+                # Data was deleted and replaced with new data
                 self._last_data_hash = current_hash
                 return True, True
 
             if current_hash != self._last_data_hash:
-                # Row content changed
+                # Data content changed
                 self._last_data_hash = current_hash
                 return True, False
 
@@ -208,22 +214,22 @@ class SheetsMonitor:
             time.sleep(check_interval)
     
     def _check_for_changes(self):
-        """Check if first row (A3:H3) has changed or been deleted/replaced"""
-        result = self.get_first_row_data()
-        current_row = result.get("first_row", [])
+        """Check if data in A3:H range has changed or been deleted/replaced"""
+        result = self.get_workstation_data()
+        current_data = result.get("flat_data", [])
 
-        has_changed, was_replaced = self._has_first_row_changed(current_row)
+        has_changed, was_replaced = self._has_data_changed(current_data)
 
         if has_changed:
             change_type = "deleted and replaced" if was_replaced else "modified"
-            print(f"[Monitor] First row (A3:H3) {change_type} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"[Monitor] Data in A3:H {change_type} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
             # Wait 7 seconds before processing
             time.sleep(7)
 
             # Trigger callback if set
             if self.on_new_data_callback:
-                self.on_new_data_callback(current_row)
+                self.on_new_data_callback(current_data)
     
     def start_monitoring(self, check_interval: int = 10):
         """Start background monitoring thread"""

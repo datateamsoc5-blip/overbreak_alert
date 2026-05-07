@@ -138,9 +138,9 @@ def send_overbreak_message(group_id: str) -> bool:
         return False
 
 
-def on_new_workstation_data(first_row: list):
-    """Callback when first row (A3:H3) changes in workstation_dump"""
-    print(f"[Callback] First row modified: {first_row}")
+def on_new_workstation_data(data: list):
+    """Callback when data in A3:H range changes in workstation_dump"""
+    print(f"[Callback] Data in A3:H modified, {len(data)} cells affected")
 
     # Get stored group_id
     if not sheets_monitor:
@@ -148,7 +148,7 @@ def on_new_workstation_data(first_row: list):
 
     group_id = sheets_monitor.get_stored_group_id()
     if not group_id:
-        print("[Warning] No group_id stored (A2 is empty), cannot send message")
+        print("[Warning] No group_id stored in 'group_id' sheet (A2 is empty), cannot send message")
         return
 
     # Send the overbreak message
