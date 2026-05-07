@@ -103,7 +103,7 @@ https://your-server.com/bot-callback
 
 1. **Bot Added to Group**: When the bot is added to a group chat:
    - Receives `bot_added_to_group_chat` event
-   - Stores `group_id` in cell A2 of workstation_dump sheet
+   - Stores `group_id` in cell A2 of **"group_id"** sheet (creates sheet if needed)
    - Waits 7 seconds
    - Sends initial overbreak monitoring message
 
@@ -141,3 +141,13 @@ e_67890 - 2.0
 ├── README.md             # Documentation
 └── seatalk_docs/          # SeaTalk API documentation
 ```
+
+## Google Sheets Tabs
+
+The bot expects these tabs in your Google Sheet:
+
+| Tab | Purpose | Data Location |
+|-----|---------|---------------|
+| `1. workstation_dump` | Monitor for data changes | A3:H3 (first row trigger) |
+| `[do_not_edit] attendance_timein_data` | Overbreak data source | N2 (timestamp), N4 (threshold), M7:O17 (employees) |
+| `group_id` | Stores SeaTalk group ID | A2 (auto-created if missing) |

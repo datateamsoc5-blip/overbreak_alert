@@ -96,7 +96,7 @@ def format_overbreak_message(attendance_data: Dict[str, Any]) -> str:
     cc_section = "\n".join(cc_lines) if cc_lines else ""
 
     # Format message with bold title using markdown
-    message = f"""**Inbound Overbreak Monitoring (bold font)**
+    message = f"""**Inbound Overbreak Monitoring**
 as of: {time_str}
 
 >1Hour = {threshold} HC
@@ -306,7 +306,7 @@ def send_test_message():
 
 @app.route("/test-sheets", methods=["GET"])
 def test_sheets():
-    """Test Google Sheets connectivity and write test value to A2"""
+    """Test Google Sheets connectivity and write test value to 'group_id' sheet A2"""
     import traceback
     try:
         if not sheets_monitor:

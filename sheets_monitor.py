@@ -117,11 +117,28 @@ class SheetsMonitor:
             print(f"Error getting attendance data: {e}")
             return {"as_of_timestamp": None, "overbreak_threshold": None, "employee_codes": [], "overbreak_hours": [], "error": str(e)}
     
-    def get_stored_group_id(self) -> Optional[str]:
-        """Get stored group_id from cell A2 of workstation_dump sheet"""
+    def _get_group_id_worksheet(self):
+        """Get or create the group_id worksheet"""
         try:
-            result = self.get_workstation_dump_data()
-            worksheet = result.get("worksheet")
+            client = self._get_client()
+            spreadsheet = client.open_by_key(self.spreadsheet_id)
+            
+            try:
+                worksheet = spreadsheet.worksheet("group_id")
+            except gspread.WorksheetNotFound:
+                # Create the worksheet if it doesn't exist
+                worksheet = spreadsheet.add_worksheet(title="group_id", rows=10, cols=2)
+                print("[DEBUG] Created new 'group_id' worksheet")
+            
+            return worksheet
+        except Exception as e:
+            print(f"[Error] Failed to get group_id worksheet: {e}")
+            return None
+    
+    def get_stored_group_id(self) -> Optional[str]:
+        """Get stored group_id from cell A2 of group_id sheet"""
+        try:
+            worksheet = self._get_group_id_worksheet()
             if worksheet:
                 return worksheet.acell('A2').value
         except Exception as e:
@@ -129,12 +146,11 @@ class SheetsMonitor:
         return None
     
     def store_group_id(self, group_id: str) -> bool:
-        """Store group_id in cell A2 of workstation_dump sheet"""
+        """Store group_id in cell A2 of group_id sheet"""
         import traceback
         try:
             print(f"[DEBUG store_group_id] Storing group_id: {group_id}")
-            result = self.get_workstation_dump_data()
-            worksheet = result.get("worksheet")
+            worksheet = self._get_group_id_worksheet()
             print(f"[DEBUG store_group_id] Got worksheet: {worksheet}")
             if worksheet:
                 print(f"[DEBUG store_group_id] Updating cell A2 with {group_id}")
