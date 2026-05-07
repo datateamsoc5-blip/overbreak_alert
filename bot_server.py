@@ -98,11 +98,12 @@ def format_overbreak_message(attendance_data: Dict[str, Any]) -> str:
     message = f"""**Inbound Overbreak Monitoring**
 as of: [{time_str}]
 
->1 HR = [{threshold}]
+>1 HR = {threshold}
 Ops _id list of Overbreak
 {employee_list}
 
-cc: {cc_section}"""
+cc: Ma'am/Sir's 
+    {cc_section}"""
 
     return message
 
