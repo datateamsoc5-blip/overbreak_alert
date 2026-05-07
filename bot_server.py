@@ -7,22 +7,47 @@ import json
 import hashlib
 import time
 import threading
+import traceback
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from flask import Flask, request, jsonify
 
-from config import config
-from seatalk_api import SeaTalkAPI
-from sheets_monitor import SheetsMonitor
+print("[STARTUP] Bot server starting...")
+
+# Load configuration with error handling
+try:
+    from config import config
+    print("[STARTUP] Config loaded successfully")
+except Exception as e:
+    print(f"[FATAL] Failed to load config: {e}")
+    traceback.print_exc()
+    raise
 
 # Configuration from config module
-GOOGLE_SHEET_ID = config.GOOGLE_SHEET_ID
-SEATALK_APP_ID = config.SEATALK_APP_ID
-SEATALK_APP_SECRET = config.SEATALK_APP_SECRET
-SEATALK_SIGNING_SECRET = config.SEATALK_SIGNING_SECRET
-CC_USER_IDS: List[str] = config.CC_USER_IDS
+try:
+    GOOGLE_SHEET_ID = config.GOOGLE_SHEET_ID
+    SEATALK_APP_ID = config.SEATALK_APP_ID
+    SEATALK_APP_SECRET = config.SEATALK_APP_SECRET
+    SEATALK_SIGNING_SECRET = config.SEATALK_SIGNING_SECRET
+    CC_USER_IDS: List[str] = config.CC_USER_IDS
+    print(f"[STARTUP] Config vars loaded. Sheet ID: {GOOGLE_SHEET_ID[:10] if GOOGLE_SHEET_ID else 'NONE'}...")
+except Exception as e:
+    print(f"[FATAL] Failed to read config values: {e}")
+    traceback.print_exc()
+    raise
+
+# Import other modules
+try:
+    from seatalk_api import SeaTalkAPI
+    from sheets_monitor import SheetsMonitor
+    print("[STARTUP] Modules imported successfully")
+except Exception as e:
+    print(f"[FATAL] Failed to import modules: {e}")
+    traceback.print_exc()
+    raise
 
 # Flask app
+print("[STARTUP] Creating Flask app...")
 app = Flask(__name__)
 
 # Initialize SeaTalk API
@@ -129,36 +154,45 @@ def on_new_workstation_data(first_row: list):
 
 def handle_bot_added_to_group_chat(event_data: Dict[str, Any]):
     """Handle bot_added_to_group_chat event"""
+    import traceback
     try:
+        print(f"[DEBUG] handle_bot_added_to_group_chat called with: {json.dumps(event_data, indent=2)[:500]}")
+
         group = event_data.get("group", {})
         group_id = group.get("group_id")
         group_name = group.get("group_name", "Unknown")
-        
+
         inviter = event_data.get("inviter", {})
         inviter_email = inviter.get("email", "Unknown")
-        
+
         print(f"[Event] Bot added to group: {group_name} (ID: {group_id}) by {inviter_email}")
-        
+
+        if not group_id:
+            print("[Error] No group_id in event data!")
+            return
+
         if not sheets_monitor:
             print("[Error] Sheets monitor not initialized")
             return
-        
+
         # Store group_id in A2
+        print(f"[DEBUG] Attempting to store group_id {group_id}...")
         if sheets_monitor.store_group_id(group_id):
             print(f"[Success] Stored group_id {group_id} in cell A2")
         else:
             print("[Error] Failed to store group_id")
             return
-        
+
         # Wait 7 seconds before sending initial message
         print("[Info] Waiting 7 seconds before sending initial message...")
         time.sleep(7)
-        
+
         # Send welcome/overbreak message
         send_overbreak_message(group_id)
-        
+
     except Exception as e:
         print(f"[Error] Handling bot_added_to_group_chat: {e}")
+        traceback.print_exc()
 
 
 def handle_event_verification(event_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -171,36 +205,45 @@ def handle_event_verification(event_data: Dict[str, Any]) -> Dict[str, Any]:
 @app.route("/bot-callback", methods=["POST"])
 def bot_callback():
     """Handle SeaTalk event callbacks"""
+    import traceback
     try:
         # Get request data
         body = request.get_data()
         signature = request.headers.get("signature", "")
-        
+
+        print(f"[DEBUG] Received callback. Headers: {dict(request.headers)}")
+        print(f"[DEBUG] Body: {body.decode('utf-8', errors='replace')[:500]}")
+
         # Verify signature
         if not seatalk_api.verify_signature(body, signature):
-            print("[Warning] Invalid signature received")
+            print(f"[Warning] Invalid signature received. Sig: {signature}")
             return jsonify({"error": "Invalid signature"}), 403
-        
+
         # Parse event
         data = json.loads(body)
         event_type = data.get("event_type", "")
         event_data = data.get("event", {})
-        
+
         print(f"[Event] Received: {event_type}")
-        
+
         # Handle verification
         if event_type == EVENT_VERIFICATION:
             response = handle_event_verification(event_data)
             return jsonify(response)
-        
+
         # Handle bot added to group chat
         elif event_type == BOT_ADDED_TO_GROUP_CHAT:
-            threading.Thread(
-                target=handle_bot_added_to_group_chat,
-                args=(event_data,),
-                daemon=True
-            ).start()
-        
+            print("[DEBUG] Starting thread for bot_added_to_group_chat")
+            def run_handler():
+                try:
+                    handle_bot_added_to_group_chat(event_data)
+                except Exception as thread_e:
+                    print(f"[Error] Thread exception: {thread_e}")
+                    traceback.print_exc()
+
+            threading.Thread(target=run_handler, daemon=True).start()
+            print("[DEBUG] Thread started")
+
         # Handle other events (log only)
         elif event_type == BOT_REMOVED_FROM_GROUP_CHAT:
             print("[Event] Bot removed from group chat")
@@ -208,32 +251,36 @@ def bot_callback():
             print("[Event] New mentioned message received")
         else:
             print(f"[Event] Unknown event type: {event_type}")
-        
+
         # Return empty 200 for all non-verification events
         return "", 200
-        
+
     except Exception as e:
         print(f"[Error] Exception in callback handler: {e}")
+        traceback.print_exc()
         return jsonify({"error": "Internal error"}), 500
+
+
+@app.route("/", methods=["GET"])
+def root():
+    """Simple root endpoint for uptime monitoring"""
+    return "OK", 200
 
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - lightweight, always returns 200 if server is up"""
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "monitoring": sheets_monitor is not None
-    })
+        "sheets_monitor_initialized": sheets_monitor is not None
+    }), 200
 
 
 @app.route("/healthz", methods=["GET"])
 def healthz_check():
-    """Kubernetes-style health check endpoint"""
-    return jsonify({
-        "status": "ok",
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }), 200
+    """Kubernetes-style health check endpoint - ultra lightweight"""
+    return "ok", 200
 
 
 @app.route("/send-test-message", methods=["POST"])
@@ -242,41 +289,97 @@ def send_test_message():
     try:
         if not sheets_monitor:
             return jsonify({"error": "Sheets monitor not initialized"}), 500
-        
+
         group_id = sheets_monitor.get_stored_group_id()
         if not group_id:
             return jsonify({"error": "No group_id stored in A2"}), 400
-        
+
         success = send_overbreak_message(group_id)
         return jsonify({"success": success, "group_id": group_id})
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/test-sheets", methods=["GET"])
+def test_sheets():
+    """Test Google Sheets connectivity and write test value to A2"""
+    import traceback
+    try:
+        if not sheets_monitor:
+            return jsonify({"error": "Sheets monitor not initialized"}), 500
+
+        # Test reading
+        print("[TEST] Reading current group_id from A2...")
+        current = sheets_monitor.get_stored_group_id()
+
+        # Test writing
+        test_val = f"test_{datetime.now().strftime('%H%M%S')}"
+        print(f"[TEST] Writing test value '{test_val}' to A2...")
+        success = sheets_monitor.store_group_id(test_val)
+
+        if success:
+            # Verify write
+            verify = sheets_monitor.get_stored_group_id()
+            return jsonify({
+                "previous_value": current,
+                "test_value_written": test_val,
+                "verified_value": verify,
+                "write_success": verify == test_val
+            })
+        else:
+            return jsonify({"error": "Failed to write to sheet"}), 500
+
+    except Exception as e:
+        print(f"[TEST ERROR] {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()}), 500
+
+
 def initialize_monitor():
     """Initialize the sheets monitor"""
+    import traceback
     global sheets_monitor
-    
+
     try:
+        print(f"[Init] Checking for google-service-account.json...")
+        import os
+        if not os.path.exists('google-service-account.json'):
+            print("[ERROR] google-service-account.json NOT FOUND!")
+            print("[ERROR] Please ensure Google credentials are set up correctly on Render.")
+            raise FileNotFoundError("google-service-account.json not found")
+
+        print("[Init] Creating SheetsMonitor...")
         sheets_monitor = SheetsMonitor(
             spreadsheet_id=GOOGLE_SHEET_ID,
             service_account_file='google-service-account.json',
             on_new_data_callback=on_new_workstation_data,
             seatalk_api=seatalk_api
         )
-        
+
+        # Test connectivity
+        print("[Init] Testing Google Sheets connectivity...")
+        test_data = sheets_monitor.get_workstation_dump_data()
+        if test_data.get("error"):
+            print(f"[ERROR] Sheets test failed: {test_data['error']}")
+        else:
+            print(f"[Init] Sheets connectivity OK, got {len(test_data.get('data', []))} rows")
+
         # Start monitoring
         sheets_monitor.start_monitoring(check_interval=10)
-        
+
         print("[Init] Sheets monitor initialized and started")
-        
+
     except Exception as e:
         print(f"[Error] Failed to initialize sheets monitor: {e}")
-        raise
+        traceback.print_exc()
+        # Don't raise - let server start so health checks work
+        sheets_monitor = None
 
 
 if __name__ == "__main__":
+    print("[STARTUP] Entering main block...")
+
     # Validate required configuration
     missing = config.validate()
 
@@ -284,16 +387,26 @@ if __name__ == "__main__":
         print(f"[Fatal] Missing required configuration: {', '.join(missing)}")
         print("[Info] Please check your .env file or environment variables")
         exit(1)
-    
-    # Initialize monitor
-    initialize_monitor()
-    
+
+    print("[STARTUP] Configuration validated")
+
+    # Initialize monitor (non-blocking - server starts even if this fails)
+    try:
+        initialize_monitor()
+    except Exception as e:
+        print(f"[Warning] Sheets monitor failed to initialize, but server will start: {e}")
+
+    # Print registered routes for debugging
+    print("[STARTUP] Registered routes:")
+    for rule in app.url_map.iter_rules():
+        print(f"  {rule.endpoint}: {rule.rule} [{','.join(rule.methods - {'OPTIONS', 'HEAD'})}]")
+
     # Start Flask server
     # PORT is provided by cloud platforms (Render, Heroku, etc.)
     # For local development, defaults to 5000
     port = int(os.getenv("PORT", "5000"))
 
-    print(f"[Server] Starting on port {port}")
+    print(f"[STARTUP] Starting server on port {port}...")
 
     # Use threaded=True to handle concurrent requests
     app.run(host="0.0.0.0", port=port, threaded=True)

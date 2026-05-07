@@ -75,10 +75,22 @@ The server will automatically use the PORT provided by the cloud platform (Rende
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/` | GET | Simple OK response (best for uptime monitoring) |
 | `/bot-callback` | POST | SeaTalk event callback handler |
 | `/health` | GET | Health check endpoint |
 | `/healthz` | GET | Kubernetes-style health check |
 | `/send-test-message` | POST | Manually trigger message send |
+| `/test-sheets` | GET | Test Google Sheets connectivity |
+
+### Uptime Monitoring (UptimeRobot)
+
+For UptimeRobot or similar services, use these endpoints:
+- **URL**: `https://your-service.onrender.com/` or `/healthz`
+- **Method**: GET
+- **Expected Response**: `OK` or `ok`
+- **Port**: 443 (HTTPS)
+
+The server will start even if Google Sheets initialization fails, so health checks will always work.
 
 ### SeaTalk Callback URL
 

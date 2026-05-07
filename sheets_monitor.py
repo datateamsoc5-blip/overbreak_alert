@@ -127,14 +127,22 @@ class SheetsMonitor:
     
     def store_group_id(self, group_id: str) -> bool:
         """Store group_id in cell A2 of workstation_dump sheet"""
+        import traceback
         try:
+            print(f"[DEBUG store_group_id] Storing group_id: {group_id}")
             result = self.get_workstation_dump_data()
             worksheet = result.get("worksheet")
+            print(f"[DEBUG store_group_id] Got worksheet: {worksheet}")
             if worksheet:
+                print(f"[DEBUG store_group_id] Updating cell A2 with {group_id}")
                 worksheet.update('A2', [[group_id]])
+                print(f"[DEBUG store_group_id] Update successful")
                 return True
+            else:
+                print(f"[DEBUG store_group_id] No worksheet found!")
         except Exception as e:
-            print(f"Error storing group ID: {e}")
+            print(f"[Error store_group_id] {e}")
+            traceback.print_exc()
         return False
     
     def _compute_data_hash(self, data: List) -> str:
