@@ -12,16 +12,17 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from flask import Flask, request, jsonify
 
-print("[STARTUP] Bot server starting...")
+import sys
+print("[STARTUP] Bot server starting...", flush=True)
 
 # Load configuration with error handling
 try:
     from config import config
-    print("[STARTUP] Config loaded successfully")
+    print("[STARTUP] Config loaded successfully", flush=True)
 except Exception as e:
-    print(f"[FATAL] Failed to load config: {e}")
+    print(f"[FATAL] Failed to load config: {e}", flush=True)
     traceback.print_exc()
-    raise
+    sys.exit(1)
 
 # Configuration from config module
 try:
@@ -30,24 +31,24 @@ try:
     SEATALK_APP_SECRET = config.SEATALK_APP_SECRET
     SEATALK_SIGNING_SECRET = config.SEATALK_SIGNING_SECRET
     CC_USER_IDS: List[str] = config.CC_USER_IDS
-    print(f"[STARTUP] Config vars loaded. Sheet ID: {GOOGLE_SHEET_ID[:10] if GOOGLE_SHEET_ID else 'NONE'}...")
+    print(f"[STARTUP] Config vars loaded. Sheet ID: {GOOGLE_SHEET_ID[:10] if GOOGLE_SHEET_ID else 'NONE'}...", flush=True)
 except Exception as e:
-    print(f"[FATAL] Failed to read config values: {e}")
+    print(f"[FATAL] Failed to read config values: {e}", flush=True)
     traceback.print_exc()
-    raise
+    sys.exit(1)
 
 # Import other modules
 try:
     from seatalk_api import SeaTalkAPI
     from sheets_monitor import SheetsMonitor
-    print("[STARTUP] Modules imported successfully")
+    print("[STARTUP] Modules imported successfully", flush=True)
 except Exception as e:
-    print(f"[FATAL] Failed to import modules: {e}")
+    print(f"[FATAL] Failed to import modules: {e}", flush=True)
     traceback.print_exc()
-    raise
+    sys.exit(1)
 
 # Flask app
-print("[STARTUP] Creating Flask app...")
+print("[STARTUP] Creating Flask app...", flush=True)
 app = Flask(__name__)
 
 # Initialize SeaTalk API
@@ -70,8 +71,8 @@ NEW_MENTIONED_MESSAGE_RECEIVED = "new_mentioned_message_received_from_group_chat
 def format_overbreak_message(attendance_data: Dict[str, Any]) -> str:
     """Format the overbreak monitoring message for SeaTalk"""
     # Get current time
-    now = datetime.now()
-    time_str = now.strftime("%I:%M%p %B %d")
+    # Get timestamp from N2 (as shown in sheet)
+    time_str = attendance_data.get("as_of_timestamp", "N/A")
 
     # Get threshold from N4
     threshold = attendance_data.get("overbreak_threshold", "N/A")
@@ -87,23 +88,24 @@ def format_overbreak_message(attendance_data: Dict[str, Any]) -> str:
 
     employee_list = "\n".join(employee_lines) if employee_lines else "No overbreak records found"
 
-    # Build cc mentions for CC_USER_IDS from config
-    cc_mentions = []
+    # Build cc mentions for CC_USER_IDS from config (each on new line)
+    cc_lines = []
     for user_id in CC_USER_IDS:
         if user_id:
-            cc_mentions.append(f"<mention-tag target=\"seatalk://user?id={user_id}\"/>")
-    cc_section = " ".join(cc_mentions) if cc_mentions else ""
+            cc_lines.append(f"<mention-tag target=\"seatalk://user?id={user_id}\"/>")
+    cc_section = "\n".join(cc_lines) if cc_lines else ""
 
     # Format message with bold title using markdown
-    message = f"""**Inbound Overbreak Monitoring**
-as of: [{time_str}]
+    message = f"""**Inbound Overbreak Monitoring (bold font)**
+as of: {time_str}
 
->1 HR = {threshold}
-Ops _id list of Overbreak
+>1Hour = {threshold} HC
+
+Ops _id list of Overbreak:
 {employee_list}
 
-cc: Ma'am/Sir's 
-    {cc_section}"""
+cc: Ma'am/Sir's
+{cc_section}"""
 
     return message
 
@@ -379,35 +381,33 @@ def initialize_monitor():
 
 
 if __name__ == "__main__":
-    print("[STARTUP] Entering main block...")
+    print("[STARTUP] Entering main block...", flush=True)
 
     # Validate required configuration
     missing = config.validate()
 
     if missing:
-        print(f"[Fatal] Missing required configuration: {', '.join(missing)}")
-        print("[Info] Please check your .env file or environment variables")
-        exit(1)
+        print(f"[Fatal] Missing required configuration: {', '.join(missing)}", flush=True)
+        print("[Info] Please check your .env file or environment variables", flush=True)
+        sys.exit(1)
 
-    print("[STARTUP] Configuration validated")
+    print("[STARTUP] Configuration validated", flush=True)
 
     # Initialize monitor (non-blocking - server starts even if this fails)
     try:
         initialize_monitor()
     except Exception as e:
-        print(f"[Warning] Sheets monitor failed to initialize, but server will start: {e}")
+        print(f"[Warning] Sheets monitor failed to initialize, but server will start: {e}", flush=True)
 
     # Print registered routes for debugging
-    print("[STARTUP] Registered routes:")
+    print("[STARTUP] Registered routes:", flush=True)
     for rule in app.url_map.iter_rules():
-        print(f"  {rule.endpoint}: {rule.rule} [{','.join(rule.methods - {'OPTIONS', 'HEAD'})}]")
+        methods = ','.join(rule.methods - {'OPTIONS', 'HEAD'})
+        print(f"  {rule.endpoint}: {rule.rule} [{methods}]", flush=True)
 
     # Start Flask server
-    # PORT is provided by cloud platforms (Render, Heroku, etc.)
-    # For local development, defaults to 5000
     port = int(os.getenv("PORT", "5000"))
-
-    print(f"[STARTUP] Starting server on port {port}...")
+    print(f"[STARTUP] Starting server on port {port}...", flush=True)
 
     # Use threaded=True to handle concurrent requests
     app.run(host="0.0.0.0", port=port, threaded=True)

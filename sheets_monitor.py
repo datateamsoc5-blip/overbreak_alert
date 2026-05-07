@@ -94,25 +94,28 @@ class SheetsMonitor:
         try:
             client = self._get_client()
             spreadsheet = client.open_by_key(self.spreadsheet_id)
-            
+
             try:
                 worksheet = spreadsheet.worksheet("[do_not_edit] attendance_timein_data")
             except gspread.WorksheetNotFound:
                 worksheet = spreadsheet.worksheet("attendance_timein_data")
-            
-            # Get N4 (overbreak threshold) and M6:M25, O6:O25 (employee list)
+
+            # Get N2 (timestamp for "as of"), N4 (overbreak threshold)
+            # and M7:M17, O7:O17 (employee list - 11 rows)
+            n2_timestamp = worksheet.acell('N2').value
             n4_value = worksheet.acell('N4').value
-            m_values = worksheet.get('M6:M25')
-            o_values = worksheet.get('O6:O25')
-            
+            m_values = worksheet.get('M7:M17')
+            o_values = worksheet.get('O7:O17')
+
             return {
+                "as_of_timestamp": n2_timestamp,
                 "overbreak_threshold": n4_value,
                 "employee_codes": [row[0] for row in m_values if row],
                 "overbreak_hours": [row[0] for row in o_values if row]
             }
         except Exception as e:
             print(f"Error getting attendance data: {e}")
-            return {"overbreak_threshold": None, "employee_codes": [], "overbreak_hours": [], "error": str(e)}
+            return {"as_of_timestamp": None, "overbreak_threshold": None, "employee_codes": [], "overbreak_hours": [], "error": str(e)}
     
     def get_stored_group_id(self) -> Optional[str]:
         """Get stored group_id from cell A2 of workstation_dump sheet"""
