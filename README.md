@@ -69,7 +69,7 @@ Place your `google-service-account.json` file in the project root. **This file i
 python bot_server.py
 ```
 
-The server requires `PORT` environment variable to be set (Render provides this automatically).
+The server will automatically use the PORT provided by the cloud platform (Render, etc.) or default to 5000 for local development.
 
 ### Endpoints
 

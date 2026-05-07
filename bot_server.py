@@ -15,7 +15,7 @@ from config import config
 from seatalk_api import SeaTalkAPI
 from sheets_monitor import SheetsMonitor
 
-# Configuration
+# Configuration from config module
 GOOGLE_SHEET_ID = config.GOOGLE_SHEET_ID
 SEATALK_APP_ID = config.SEATALK_APP_ID
 SEATALK_APP_SECRET = config.SEATALK_APP_SECRET
@@ -289,10 +289,9 @@ if __name__ == "__main__":
     initialize_monitor()
     
     # Start Flask server
-    port = config.PORT
-    if not port:
-        print("[Error] PORT environment variable not set")
-        exit(1)
+    # PORT is provided by cloud platforms (Render, Heroku, etc.)
+    # For local development, defaults to 5000
+    port = int(os.getenv("PORT", "5000"))
 
     print(f"[Server] Starting on port {port}")
 
