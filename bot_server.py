@@ -227,6 +227,15 @@ def health_check():
     })
 
 
+@app.route("/healthz", methods=["GET"])
+def healthz_check():
+    """Kubernetes-style health check endpoint"""
+    return jsonify({
+        "status": "ok",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }), 200
+
+
 @app.route("/send-test-message", methods=["POST"])
 def send_test_message():
     """Manual endpoint to send test message (for debugging)"""
@@ -281,7 +290,11 @@ if __name__ == "__main__":
     
     # Start Flask server
     port = config.PORT
+    if not port:
+        print("[Error] PORT environment variable not set")
+        exit(1)
+
     print(f"[Server] Starting on port {port}")
-    
+
     # Use threaded=True to handle concurrent requests
     app.run(host="0.0.0.0", port=port, threaded=True)

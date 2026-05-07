@@ -69,7 +69,7 @@ Place your `google-service-account.json` file in the project root. **This file i
 python bot_server.py
 ```
 
-The server will start on port 5000 (or set `PORT` env var).
+The server requires `PORT` environment variable to be set (Render provides this automatically).
 
 ### Endpoints
 
@@ -77,6 +77,7 @@ The server will start on port 5000 (or set `PORT` env var).
 |----------|--------|-------------|
 | `/bot-callback` | POST | SeaTalk event callback handler |
 | `/health` | GET | Health check endpoint |
+| `/healthz` | GET | Kubernetes-style health check |
 | `/send-test-message` | POST | Manually trigger message send |
 
 ### SeaTalk Callback URL

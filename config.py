@@ -27,8 +27,12 @@ class Config:
         ids = os.getenv("CC_USER_IDS", "")
         return [uid.strip() for uid in ids.split(",") if uid.strip()]
     
-    # Server
-    PORT: int = int(os.getenv("PORT", "5000"))
+    # Server (no default - must be set via environment)
+    @property
+    def PORT(self) -> Optional[int]:
+        """Get port from environment variable (required for cloud platforms)"""
+        port = os.getenv("PORT")
+        return int(port) if port else None
     
     # Environment
     FLASK_ENV: str = os.getenv("FLASK_ENV", "development")
