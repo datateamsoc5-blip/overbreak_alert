@@ -61,6 +61,21 @@ seatalk_api = SeaTalkAPI(
 # Initialize Sheets Monitor
 sheets_monitor: Optional[SheetsMonitor] = None
 
+# Keep grouped message bursts below SeaTalk limits and make delivery more reliable.
+MESSAGE_SEND_DELAY_SECONDS = float(os.getenv("SEATALK_MESSAGE_SEND_DELAY_SECONDS", "1"))
+MESSAGE_SEND_MAX_RETRIES = int(os.getenv("SEATALK_MESSAGE_SEND_MAX_RETRIES", "3"))
+MESSAGE_SEND_RETRY_DELAY_SECONDS = float(os.getenv("SEATALK_MESSAGE_SEND_RETRY_DELAY_SECONDS", "3"))
+
+# SeaTalk can throttle bursts or return temporary upstream failures. Retry only
+# errors that are likely to succeed on a later attempt.
+RETRYABLE_SEATALK_CODES = {
+    429,
+    500,
+    502,
+    503,
+    504,
+}
+
 # Event types
 EVENT_VERIFICATION = "event_verification"
 BOT_ADDED_TO_GROUP_CHAT = "bot_added_to_group_chat"
@@ -141,7 +156,11 @@ def format_attendance_messages(attendance_data: Dict[str, Any]) -> List[str]:
     ]
 
 
-def send_overbreak_message(group_id: str, message: Optional[str] = None) -> bool:
+def send_overbreak_message(
+    group_id: str,
+    message: Optional[str] = None,
+    message_label: str = "message"
+) -> bool:
     """Send overbreak monitoring message to one group chat."""
     try:
         if not sheets_monitor:
@@ -152,28 +171,56 @@ def send_overbreak_message(group_id: str, message: Optional[str] = None) -> bool
             attendance_data = sheets_monitor.get_attendance_timein_data()
             message = format_overbreak_message(attendance_data)
         
-        # Send to group
-        result = seatalk_api.send_group_message(group_id, message, format_type=1)
-        
-        if result.get("code") == 0:
-            print(f"[Success] Message sent to group {group_id}")
-            return True
-        else:
-            print(f"[Error] Failed to send message: {result}")
-            return False
+        max_attempts = MESSAGE_SEND_MAX_RETRIES + 1
+        for attempt in range(1, max_attempts + 1):
+            try:
+                print(f"[Send] Sending {message_label} to group {group_id} (attempt {attempt}/{max_attempts})")
+                result = seatalk_api.send_group_message(group_id, message, format_type=1)
+
+                if result.get("code") == 0:
+                    print(f"[Success] Sent {message_label} to group {group_id}; message_id={result.get('message_id')}")
+                    return True
+
+                code = result.get("code")
+                print(f"[Error] Failed to send {message_label} to group {group_id}: {result}")
+                should_retry = code in RETRYABLE_SEATALK_CODES
+            except Exception as send_error:
+                status_code = getattr(getattr(send_error, "response", None), "status_code", None)
+                should_retry = status_code in RETRYABLE_SEATALK_CODES or status_code is None
+                print(f"[Error] Exception sending {message_label} to group {group_id}: {send_error}")
+
+            if not should_retry or attempt == max_attempts:
+                return False
+
+            retry_delay = MESSAGE_SEND_RETRY_DELAY_SECONDS * attempt
+            print(f"[Retry] Waiting {retry_delay}s before retrying {message_label} to group {group_id}")
+            time.sleep(retry_delay)
+
+        return False
             
     except Exception as e:
-        print(f"[Error] Exception sending message: {e}")
+        print(f"[Error] Exception sending {message_label} to group {group_id}: {e}")
         return False
 
 
-def send_attendance_messages(group_id: str, messages: List[str]) -> bool:
+def send_attendance_messages(group_id: str, messages: List[str]) -> Dict[str, Any]:
     """Send all attendance monitoring messages to one group chat."""
-    all_sent = True
-    for message in messages:
-        if not send_overbreak_message(group_id, message=message):
-            all_sent = False
-    return all_sent
+    sent = []
+    failed = []
+    total_messages = len(messages)
+    for index, message in enumerate(messages, start=1):
+        message_label = f"attendance message {index}/{total_messages}"
+        if send_overbreak_message(group_id, message=message, message_label=message_label):
+            sent.append(index)
+        else:
+            failed.append(index)
+        if index < total_messages and MESSAGE_SEND_DELAY_SECONDS > 0:
+            time.sleep(MESSAGE_SEND_DELAY_SECONDS)
+    return {
+        "success": not failed,
+        "sent_messages": sent,
+        "failed_messages": failed,
+    }
 
 
 def send_overbreak_message_to_all_groups() -> Dict[str, Any]:
@@ -189,14 +236,21 @@ def send_overbreak_message_to_all_groups() -> Dict[str, Any]:
 
     attendance_data = sheets_monitor.get_attendance_timein_data()
     messages = format_attendance_messages(attendance_data)
+    print(f"[Broadcast] Preparing {len(messages)} attendance messages for {len(group_ids)} groups: {group_ids}")
 
     sent = []
     failed = []
-    for group_id in group_ids:
-        if send_attendance_messages(group_id, messages):
+    group_results = {}
+    for group_index, group_id in enumerate(group_ids, start=1):
+        print(f"[Broadcast] Sending to group {group_index}/{len(group_ids)}: {group_id}")
+        group_result = send_attendance_messages(group_id, messages)
+        group_results[group_id] = group_result
+        if group_result["success"]:
             sent.append(group_id)
         else:
             failed.append(group_id)
+        if group_index < len(group_ids) and MESSAGE_SEND_DELAY_SECONDS > 0:
+            time.sleep(MESSAGE_SEND_DELAY_SECONDS)
 
     print(f"[Broadcast] Sent {len(messages)} attendance messages to {len(sent)}/{len(group_ids)} groups")
     return {
@@ -204,7 +258,8 @@ def send_overbreak_message_to_all_groups() -> Dict[str, Any]:
         "sent": sent,
         "failed": failed,
         "total": len(group_ids),
-        "messages_per_group": len(messages)
+        "messages_per_group": len(messages),
+        "group_results": group_results,
     }
 
 
@@ -256,7 +311,8 @@ def handle_bot_added_to_group_chat(event_data: Dict[str, Any]):
         # Send attendance monitoring messages
         attendance_data = sheets_monitor.get_attendance_timein_data()
         messages = format_attendance_messages(attendance_data)
-        send_attendance_messages(group_id, messages)
+        result = send_attendance_messages(group_id, messages)
+        print(f"[Event] Initial attendance message result for {group_id}: {result}")
 
     except Exception as e:
         print(f"[Error] Handling bot_added_to_group_chat: {e}")

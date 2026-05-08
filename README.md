@@ -53,6 +53,9 @@ SEATALK_APP_ID=your_seatalk_app_id_here
 SEATALK_APP_SECRET=your_seatalk_app_secret_here
 SEATALK_SIGNING_SECRET=your_signing_secret_here
 CC_USER_IDS=user_id_1,user_id_2,user_id_3
+SEATALK_MESSAGE_SEND_DELAY_SECONDS=1
+SEATALK_MESSAGE_SEND_MAX_RETRIES=3
+SEATALK_MESSAGE_SEND_RETRY_DELAY_SECONDS=3
 ```
 
 ### Google Service Account
@@ -109,12 +112,13 @@ https://your-server.com/bot-callback
    - Receives `bot_added_to_group_chat` event
    - Stores `group_id` in column A of **"group_id"** sheet, starting at A2 (creates sheet if needed)
    - Waits 7 seconds
-   - Sends initial overbreak monitoring message
+   - Sends the three initial attendance messages
 
 2. **Data Change Detection**: When new data is pasted in A3:H of workstation_dump:
    - Monitor detects the change (10-second polling interval)
    - Waits 7 seconds
    - Sends the three updated attendance messages to every group_id in `group_id!A2:A`
+   - Retries transient SeaTalk/API failures before marking a group as failed
 
 ## Message Format Example
 
