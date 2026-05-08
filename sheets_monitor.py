@@ -218,33 +218,33 @@ class SheetsMonitor:
         import json
         return json.dumps(data, sort_keys=True)
 
-    def _has_data_changed(self, current_data: List) -> tuple[bool, bool]:
+    def _has_data_changed(self, current_data: List) -> tuple[bool, bool, bool]:
         """Check if data in A3:H has changed or was deleted/replaced.
-        Returns: (has_changed, was_deleted_and_replaced)"""
+        Returns: (has_changed, was_deleted_and_replaced, has_data)"""
         current_hash = self._compute_data_hash(current_data)
         is_empty = not current_data or all(cell == "" for cell in current_data)
+        has_data = not is_empty
 
         with self._lock:
             if self._last_data_hash is None:
                 # First run
                 self._last_data_hash = current_hash
-                return False, False
+                return False, False, has_data
 
             # Check if data was deleted (became empty) and now has data
             last_was_empty = self._last_data_hash == self._compute_data_hash([])
-            now_has_data = not is_empty
 
-            if last_was_empty and now_has_data:
+            if last_was_empty and has_data:
                 # Data was deleted and replaced with new data
                 self._last_data_hash = current_hash
-                return True, True
+                return True, True, has_data
 
             if current_hash != self._last_data_hash:
                 # Data content changed
                 self._last_data_hash = current_hash
-                return True, False
+                return True, False, has_data
 
-            return False, False
+            return False, False, has_data
     
     def _monitor_loop(self, check_interval: int = 10):
         """Background monitoring loop"""
@@ -261,11 +261,15 @@ class SheetsMonitor:
         result = self.get_workstation_data()
         current_data = result.get("flat_data", [])
 
-        has_changed, was_replaced = self._has_data_changed(current_data)
+        has_changed, was_replaced, has_data = self._has_data_changed(current_data)
 
         if has_changed:
             change_type = "deleted and replaced" if was_replaced else "modified"
             print(f"[Monitor] Data in A3:H {change_type} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+            if not has_data:
+                print("[Monitor] A3:H is empty, skipping SeaTalk send")
+                return
 
             # Wait 7 seconds before processing
             time.sleep(7)
