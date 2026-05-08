@@ -51,10 +51,12 @@ def test_sheets_monitor():
         attendance = monitor.get_attendance_timein_data()
         print(f"✓ Overbreak threshold (N4): {attendance.get('overbreak_threshold')}")
         print(f"✓ Employee codes count: {len(attendance.get('employee_codes', []))}")
+        print(f"✓ No breaktime scan count: {len(attendance.get('no_breaktime_scan', []))}")
+        print(f"✓ Ongoing breaktime count: {len(attendance.get('ongoing_breaktime', []))}")
         
-        # Test stored group_id
-        group_id = monitor.get_stored_group_id()
-        print(f"✓ Stored group_id (A2): {group_id}")
+        # Test stored group_ids
+        group_ids = monitor.get_stored_group_ids()
+        print(f"✓ Stored group_ids (A2:A): {group_ids}")
         
         return True
     except Exception as e:
@@ -79,9 +81,9 @@ def test_send_message():
         service_account_file='google-service-account.json'
     )
     
-    group_id = monitor.get_stored_group_id()
-    if not group_id:
-        print("✗ No group_id stored in A2. Add bot to a group first.")
+    group_ids = monitor.get_stored_group_ids()
+    if not group_ids:
+        print("✗ No group_id stored in A2:A. Add bot to a group first.")
         return False
     
     # Get attendance data and format message
@@ -110,7 +112,7 @@ def test_send_message():
             cc_mentions.append(f"<mention-tag target=\"seatalk://user?id={user_id.strip()}\"/>")
     cc_section = " ".join(cc_mentions) if cc_mentions else ""
 
-    message = f"""**Inbound Overbreak Monitoring**
+    overbreak_message = f"""**Inbound Overbreak Monitoring**
 as of: [{time_str}]
 
 >1 HR = [{threshold}]
@@ -118,17 +120,38 @@ Ops _id list of Overbreak
 {employee_list}
 
 cc: {cc_section}"""
+
+    no_breaktime_scan = attendance_data.get("no_breaktime_scan", [])
+    ongoing_breaktime = attendance_data.get("ongoing_breaktime", [])
+    messages = [
+        overbreak_message,
+        f"""**No Breaktime Scan in FMS Workstation**
+{chr(10).join(no_breaktime_scan) if no_breaktime_scan else "No records"}""",
+        f"""**Ongoing Breaktime**
+{chr(10).join(ongoing_breaktime) if ongoing_breaktime else "No records"}"""
+    ]
     
-    print(f"Message to send:\n{message}\n")
+    print(f"Messages to send:\n\n" + "\n\n".join(messages) + "\n")
     
     try:
-        result = api.send_group_message(group_id, message, format_type=1)
-        if result.get("code") == 0:
-            print(f"✓ Message sent successfully! Message ID: {result.get('message_id')}")
-            return True
-        else:
-            print(f"✗ Failed to send: {result}")
-            return False
+        sent = []
+        failed = []
+        for group_id in group_ids:
+            group_success = True
+            for message in messages:
+                result = api.send_group_message(group_id, message, format_type=1)
+                if result.get("code") == 0:
+                    print(f"✓ Message sent successfully to {group_id}! Message ID: {result.get('message_id')}")
+                else:
+                    print(f"✗ Failed to send to {group_id}: {result}")
+                    group_success = False
+
+            if group_success:
+                sent.append(group_id)
+            else:
+                failed.append(group_id)
+
+        return not failed and bool(sent)
     except Exception as e:
         print(f"✗ Exception: {e}")
         return False
@@ -150,9 +173,9 @@ def test_store_group_id():
     try:
         success = monitor.store_group_id(test_group_id)
         if success:
-            stored = monitor.get_stored_group_id()
-            if stored == test_group_id:
-                print(f"✓ Successfully stored and retrieved group_id: {stored}")
+            stored = monitor.get_stored_group_ids()
+            if test_group_id in stored:
+                print(f"✓ Successfully stored and retrieved group_id: {test_group_id}")
                 return True
         print("✗ Failed to store group_id")
         return False

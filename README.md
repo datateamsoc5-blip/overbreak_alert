@@ -4,14 +4,18 @@ A Flask-based bot server for SeaTalk that monitors Google Sheets for overbreak d
 
 ## Features
 
-- **Event Callback Handling**: Handles `bot_added_to_group_chat` events and stores `group_id` in Google Sheets cell A2
+- **Event Callback Handling**: Handles `bot_added_to_group_chat` events and stores each `group_id` in Google Sheets column A starting at A2
 - **Google Sheets Monitoring**: Continuously monitors `workstation_dump` tab (range A3:H) for new data
 - **7-Second Delay**: Waits 7 seconds before sending messages when new data is detected
-- **Overbreak Message Format**: Sends formatted messages with:
+- **Attendance Message Format**: Sends three formatted messages with:
   - Bold title: **Inbound Overbreak Monitoring**
-  - Current timestamp
+  - Bold title: **No Breaktime Scan in FMS Workstation**
+  - Bold title: **Ongoing Breaktime**
+  - Sheet timestamp
   - Overbreak threshold (>1 HR = value from N4)
-  - Employee list with overbreak hours (M6:M25 paired with O6:O25)
+  - Employee list with overbreak hours (M7:M17 paired with O7:O17)
+  - No breaktime scan list from P2:P50
+  - Ongoing breaktime list from R2:R50
 - **Signature Verification**: Validates SeaTalk event callbacks using SHA-256 signing secret
 
 ## Prerequisites
@@ -23,7 +27,7 @@ A Flask-based bot server for SeaTalk that monitors Google Sheets for overbreak d
    - Signing Secret
 3. Google Cloud Service Account with Sheets API access
 4. Google Sheet with the following tabs:
-   - `1. workstation_dump` (data in A3:H, group_id stored in A2)
+   - `1. workstation_dump` (data in A3:H)
    - `[do_not_edit] attendance_timein_data` (N4 = threshold, M6:M25 = employee codes, O6:O25 = hours)
 
 ## Installation
@@ -103,14 +107,14 @@ https://your-server.com/bot-callback
 
 1. **Bot Added to Group**: When the bot is added to a group chat:
    - Receives `bot_added_to_group_chat` event
-   - Stores `group_id` in cell A2 of **"group_id"** sheet (creates sheet if needed)
+   - Stores `group_id` in column A of **"group_id"** sheet, starting at A2 (creates sheet if needed)
    - Waits 7 seconds
    - Sends initial overbreak monitoring message
 
 2. **Data Change Detection**: When new data is pasted in A3:H of workstation_dump:
    - Monitor detects the change (10-second polling interval)
    - Waits 7 seconds
-   - Sends updated overbreak message to stored group_id
+   - Sends the three updated attendance messages to every group_id in `group_id!A2:A`
 
 ## Message Format Example
 
@@ -122,6 +126,14 @@ as of: [9:42AM May 3]
 Ops _id list of Overbreak
 e_12345 - 1.5
 e_67890 - 2.0
+
+**No Breaktime Scan in FMS Workstation**
+e_11111
+e_22222
+
+**Ongoing Breaktime**
+e_33333
+e_44444
 ```
 
 ## Project Structure
@@ -149,5 +161,5 @@ The bot expects these tabs in your Google Sheet:
 | Tab | Purpose | Data Location |
 |-----|---------|---------------|
 | `1. workstation_dump` | Monitor for data changes | A3:H3 (first row trigger) |
-| `[do_not_edit] attendance_timein_data` | Overbreak data source | N2 (timestamp), N4 (threshold), M7:O17 (employees) |
-| `group_id` | Stores SeaTalk group ID | A2 (auto-created if missing) |
+| `[do_not_edit] attendance_timein_data` | Attendance message data source | N2 (timestamp), N4 (threshold), M7:O17 (overbreak), P2:P50 (no breaktime scan), R2:R50 (ongoing breaktime) |
+| `group_id` | Stores SeaTalk group IDs | A2:A (auto-created if missing) |

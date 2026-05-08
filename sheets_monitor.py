@@ -106,22 +106,35 @@ class SheetsMonitor:
             except gspread.WorksheetNotFound:
                 worksheet = spreadsheet.worksheet("attendance_timein_data")
 
-            # Get N2 (timestamp for "as of"), N4 (overbreak threshold)
-            # and M7:M17, O7:O17 (employee list - 11 rows)
+            # Get N2 (timestamp for "as of"), N4 (overbreak threshold),
+            # M7:M17/O7:O17 (overbreak list), P2:P50 (no breaktime scan),
+            # and R2:R50 (ongoing breaktime).
             n2_timestamp = worksheet.acell('N2').value
             n4_value = worksheet.acell('N4').value
             m_values = worksheet.get('M7:M17')
             o_values = worksheet.get('O7:O17')
+            p_values = worksheet.get('P2:P50')
+            r_values = worksheet.get('R2:R50')
 
             return {
                 "as_of_timestamp": n2_timestamp,
                 "overbreak_threshold": n4_value,
                 "employee_codes": [row[0] for row in m_values if row],
-                "overbreak_hours": [row[0] for row in o_values if row]
+                "overbreak_hours": [row[0] for row in o_values if row],
+                "no_breaktime_scan": [str(row[0]).strip() for row in p_values if row and str(row[0]).strip()],
+                "ongoing_breaktime": [str(row[0]).strip() for row in r_values if row and str(row[0]).strip()]
             }
         except Exception as e:
             print(f"Error getting attendance data: {e}")
-            return {"as_of_timestamp": None, "overbreak_threshold": None, "employee_codes": [], "overbreak_hours": [], "error": str(e)}
+            return {
+                "as_of_timestamp": None,
+                "overbreak_threshold": None,
+                "employee_codes": [],
+                "overbreak_hours": [],
+                "no_breaktime_scan": [],
+                "ongoing_breaktime": [],
+                "error": str(e)
+            }
     
     def _get_group_id_worksheet(self):
         """Get or create the group_id worksheet"""
@@ -141,26 +154,56 @@ class SheetsMonitor:
             print(f"[Error] Failed to get group_id worksheet: {e}")
             return None
     
-    def get_stored_group_id(self) -> Optional[str]:
-        """Get stored group_id from cell A2 of group_id sheet"""
+    def get_stored_group_ids(self) -> List[str]:
+        """Get all stored group_ids from column A starting at A2."""
         try:
             worksheet = self._get_group_id_worksheet()
             if worksheet:
-                return worksheet.acell('A2').value
+                values = worksheet.get('A2:A')
+                group_ids = []
+                seen = set()
+                for row in values:
+                    if not row:
+                        continue
+
+                    group_id = str(row[0]).strip()
+                    if group_id and group_id not in seen:
+                        group_ids.append(group_id)
+                        seen.add(group_id)
+
+                return group_ids
         except Exception as e:
-            print(f"Error getting stored group ID: {e}")
+            print(f"Error getting stored group IDs: {e}")
+        return []
+
+    def get_stored_group_id(self) -> Optional[str]:
+        """Get the first stored group_id from group_id sheet for compatibility."""
+        group_ids = self.get_stored_group_ids()
+        if group_ids:
+            return group_ids[0]
         return None
     
     def store_group_id(self, group_id: str) -> bool:
-        """Store group_id in cell A2 of group_id sheet"""
+        """Store group_id in the next empty cell in column A, starting at A2."""
         import traceback
         try:
+            group_id = str(group_id).strip()
+            if not group_id:
+                print("[DEBUG store_group_id] Empty group_id, skipping store")
+                return False
+
             print(f"[DEBUG store_group_id] Storing group_id: {group_id}")
             worksheet = self._get_group_id_worksheet()
             print(f"[DEBUG store_group_id] Got worksheet: {worksheet}")
             if worksheet:
-                print(f"[DEBUG store_group_id] Updating cell A2 with {group_id}")
-                worksheet.update('A2', [[group_id]])
+                existing_group_ids = self.get_stored_group_ids()
+                if group_id in existing_group_ids:
+                    print(f"[DEBUG store_group_id] group_id already stored: {group_id}")
+                    return True
+
+                next_row = len(worksheet.get('A2:A')) + 2
+                print(f"[DEBUG store_group_id] Updating cell A{next_row} with {group_id}")
+                worksheet.update(f'A{next_row}', [[group_id]])
                 print(f"[DEBUG store_group_id] Update successful")
                 return True
             else:

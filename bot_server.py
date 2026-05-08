@@ -86,7 +86,7 @@ def format_overbreak_message(attendance_data: Dict[str, Any]) -> str:
         if code:  # Only include if employee code exists
             employee_lines.append(f"{code} - {hours}")
 
-    employee_list = "\n".join(employee_lines) if employee_lines else "No overbreak records found"
+    employee_list = "\n".join(employee_lines) if employee_lines else "No overbreak logs"
 
     # Build cc mentions for CC_USER_IDS from config (each on new line)
     cc_lines = []
@@ -99,7 +99,7 @@ def format_overbreak_message(attendance_data: Dict[str, Any]) -> str:
     message = f"""**Inbound Overbreak Monitoring**
 as of: {time_str}
 
->1Hour = {threshold} HC
+>1.5Hours = {threshold} HC
 
 Ops _id list of Overbreak:
 {employee_list}
@@ -110,18 +110,38 @@ cc: Ma'am/Sir's
     return message
 
 
-def send_overbreak_message(group_id: str) -> bool:
-    """Send overbreak monitoring message to group chat"""
+def format_list_message(title: str, values: List[str], empty_text: str = "No records") -> str:
+    """Format a title plus one value per line for SeaTalk."""
+    item_list = "\n".join(values) if values else empty_text
+    return f"""**{title}**
+{item_list}"""
+
+
+def format_attendance_messages(attendance_data: Dict[str, Any]) -> List[str]:
+    """Format all attendance monitoring messages for SeaTalk."""
+    return [
+        format_overbreak_message(attendance_data),
+        format_list_message(
+            "No Breaktime Scan in FMS Workstation",
+            attendance_data.get("no_breaktime_scan", [])
+        ),
+        format_list_message(
+            "Ongoing Breaktime",
+            attendance_data.get("ongoing_breaktime", [])
+        )
+    ]
+
+
+def send_overbreak_message(group_id: str, message: Optional[str] = None) -> bool:
+    """Send overbreak monitoring message to one group chat."""
     try:
         if not sheets_monitor:
             print("[Error] Sheets monitor not initialized")
             return False
-        
-        # Get attendance data
-        attendance_data = sheets_monitor.get_attendance_timein_data()
-        
-        # Format message
-        message = format_overbreak_message(attendance_data)
+
+        if message is None:
+            attendance_data = sheets_monitor.get_attendance_timein_data()
+            message = format_overbreak_message(attendance_data)
         
         # Send to group
         result = seatalk_api.send_group_message(group_id, message, format_type=1)
@@ -138,21 +158,55 @@ def send_overbreak_message(group_id: str) -> bool:
         return False
 
 
+def send_attendance_messages(group_id: str, messages: List[str]) -> bool:
+    """Send all attendance monitoring messages to one group chat."""
+    all_sent = True
+    for message in messages:
+        if not send_overbreak_message(group_id, message=message):
+            all_sent = False
+    return all_sent
+
+
+def send_overbreak_message_to_all_groups() -> Dict[str, Any]:
+    """Send attendance monitoring messages to every group_id in group_id!A2:A."""
+    if not sheets_monitor:
+        print("[Error] Sheets monitor not initialized")
+        return {"success": False, "sent": [], "failed": [], "error": "Sheets monitor not initialized"}
+
+    group_ids = sheets_monitor.get_stored_group_ids()
+    if not group_ids:
+        print("[Warning] No group_ids stored in 'group_id' sheet (A2:A is empty), cannot send message")
+        return {"success": False, "sent": [], "failed": [], "error": "No group_ids stored in A2:A"}
+
+    attendance_data = sheets_monitor.get_attendance_timein_data()
+    messages = format_attendance_messages(attendance_data)
+
+    sent = []
+    failed = []
+    for group_id in group_ids:
+        if send_attendance_messages(group_id, messages):
+            sent.append(group_id)
+        else:
+            failed.append(group_id)
+
+    print(f"[Broadcast] Sent {len(messages)} attendance messages to {len(sent)}/{len(group_ids)} groups")
+    return {
+        "success": not failed,
+        "sent": sent,
+        "failed": failed,
+        "total": len(group_ids),
+        "messages_per_group": len(messages)
+    }
+
+
 def on_new_workstation_data(data: list):
     """Callback when data in A3:H range changes in workstation_dump"""
     print(f"[Callback] Data in A3:H modified, {len(data)} cells affected")
 
-    # Get stored group_id
     if not sheets_monitor:
         return
 
-    group_id = sheets_monitor.get_stored_group_id()
-    if not group_id:
-        print("[Warning] No group_id stored in 'group_id' sheet (A2 is empty), cannot send message")
-        return
-
-    # Send the overbreak message
-    send_overbreak_message(group_id)
+    send_overbreak_message_to_all_groups()
 
 
 def handle_bot_added_to_group_chat(event_data: Dict[str, Any]):
@@ -178,10 +232,10 @@ def handle_bot_added_to_group_chat(event_data: Dict[str, Any]):
             print("[Error] Sheets monitor not initialized")
             return
 
-        # Store group_id in A2
+        # Store group_id in column A starting at A2
         print(f"[DEBUG] Attempting to store group_id {group_id}...")
         if sheets_monitor.store_group_id(group_id):
-            print(f"[Success] Stored group_id {group_id} in cell A2")
+            print(f"[Success] Stored group_id {group_id} in group_id column A")
         else:
             print("[Error] Failed to store group_id")
             return
@@ -190,8 +244,10 @@ def handle_bot_added_to_group_chat(event_data: Dict[str, Any]):
         print("[Info] Waiting 7 seconds before sending initial message...")
         time.sleep(7)
 
-        # Send welcome/overbreak message
-        send_overbreak_message(group_id)
+        # Send attendance monitoring messages
+        attendance_data = sheets_monitor.get_attendance_timein_data()
+        messages = format_attendance_messages(attendance_data)
+        send_attendance_messages(group_id, messages)
 
     except Exception as e:
         print(f"[Error] Handling bot_added_to_group_chat: {e}")
@@ -288,17 +344,16 @@ def healthz_check():
 
 @app.route("/send-test-message", methods=["POST"])
 def send_test_message():
-    """Manual endpoint to send test message (for debugging)"""
+    """Manual endpoint to send test message to all configured groups."""
     try:
         if not sheets_monitor:
             return jsonify({"error": "Sheets monitor not initialized"}), 500
 
-        group_id = sheets_monitor.get_stored_group_id()
-        if not group_id:
-            return jsonify({"error": "No group_id stored in A2"}), 400
+        result = send_overbreak_message_to_all_groups()
+        if not result["sent"] and result.get("error"):
+            return jsonify({"error": result["error"]}), 400
 
-        success = send_overbreak_message(group_id)
-        return jsonify({"success": success, "group_id": group_id})
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -306,26 +361,30 @@ def send_test_message():
 
 @app.route("/test-sheets", methods=["GET"])
 def test_sheets():
-    """Test Google Sheets connectivity and write test value to 'group_id' sheet A2"""
+    """Test Google Sheets connectivity without adding fake group IDs."""
     import traceback
     try:
         if not sheets_monitor:
             return jsonify({"error": "Sheets monitor not initialized"}), 500
 
         # Test reading
-        print("[TEST] Reading current group_id from A2...")
-        current = sheets_monitor.get_stored_group_id()
+        print("[TEST] Reading current group_ids from A2:A...")
+        current = sheets_monitor.get_stored_group_ids()
 
-        # Test writing
+        # Test writing outside the group_id list so broadcasts do not use fake IDs.
         test_val = f"test_{datetime.now().strftime('%H%M%S')}"
-        print(f"[TEST] Writing test value '{test_val}' to A2...")
-        success = sheets_monitor.store_group_id(test_val)
+        print(f"[TEST] Writing test value '{test_val}' to B2...")
+        worksheet = sheets_monitor._get_group_id_worksheet()
+        success = False
+        if worksheet:
+            worksheet.update('B2', [[test_val]])
+            success = True
 
         if success:
             # Verify write
-            verify = sheets_monitor.get_stored_group_id()
+            verify = worksheet.acell('B2').value
             return jsonify({
-                "previous_value": current,
+                "group_ids": current,
                 "test_value_written": test_val,
                 "verified_value": verify,
                 "write_success": verify == test_val
