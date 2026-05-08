@@ -113,8 +113,17 @@ cc: Ma'am/Sir's
 def format_list_message(title: str, values: List[str], empty_text: str = "No records") -> str:
     """Format a title plus one value per line for SeaTalk."""
     item_list = "\n".join(values) if values else empty_text
+    cc_lines = []
+    for user_id in CC_USER_IDS:
+        if user_id:
+            cc_lines.append(f"<mention-tag target=\"seatalk://user?id={user_id}\"/>")
+    cc_section = "\n".join(cc_lines) if cc_lines else ""
+
     return f"""**{title}**
-{item_list}"""
+{item_list}
+
+cc: Ma'am/Sir's
+{cc_section}"""
 
 
 def format_attendance_messages(attendance_data: Dict[str, Any]) -> List[str]:

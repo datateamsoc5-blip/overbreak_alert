@@ -126,9 +126,15 @@ cc: {cc_section}"""
     messages = [
         overbreak_message,
         f"""**No Breaktime Scan in FMS Workstation**
-{chr(10).join(no_breaktime_scan) if no_breaktime_scan else "No records"}""",
+{chr(10).join(no_breaktime_scan) if no_breaktime_scan else "No records"}
+
+cc: Ma'am/Sir's
+{chr(10).join(cc_mentions)}""",
         f"""**Ongoing Breaktime**
-{chr(10).join(ongoing_breaktime) if ongoing_breaktime else "No records"}"""
+{chr(10).join(ongoing_breaktime) if ongoing_breaktime else "No records"}
+
+cc: Ma'am/Sir's
+{chr(10).join(cc_mentions)}"""
     ]
     
     print(f"Messages to send:\n\n" + "\n\n".join(messages) + "\n")
